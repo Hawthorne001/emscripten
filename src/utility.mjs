@@ -27,7 +27,7 @@ export function dump(item) {
       item.funcData = null;
     }
     return '// ' + JSON.stringify(item, null, '  ').replace(/\n/g, '\n// ');
-  } catch (e) {
+  } catch {
     const ret = [];
     for (const [i, j] of Object.entries(item)) {
       if (typeof j == 'string' || typeof j == 'number') {
@@ -201,11 +201,6 @@ export function mergeInto(obj, other, options = null) {
   return Object.assign(obj, other);
 }
 
-export function isNumber(x) {
-  // XXX this does not handle 0xabc123 etc. We should likely also do x == parseInt(x) (which handles that), and remove hack |// handle 0x... as well|
-  return x == parseFloat(x) || (typeof x == 'string' && x.match(/^-?\d+$/)) || x == 'NaN';
-}
-
 // Symbols that start with '$' are not exported to the wasm module.
 // They are intended to be called exclusively by JS code.
 export function isJsOnlySymbol(symbol) {
@@ -231,25 +226,20 @@ export function isDecorator(ident) {
   return suffixes.some((suffix) => ident.endsWith(suffix));
 }
 
-export function isPowerOfTwo(x) {
-  return x > 0 && (x & (x - 1)) == 0;
-}
-
 export function read(filename) {
-  const absolute = find(filename);
-  return fs.readFileSync(absolute).toString();
+  return fs.readFileSync(filename, 'utf8');
 }
 
-export function find(filename) {
-  const dirname = url.fileURLToPath(new URL('.', import.meta.url));
-  const prefixes = [process.cwd(), path.join(dirname, '..', 'src')];
-  for (let i = 0; i < prefixes.length; ++i) {
-    const combined = path.join(prefixes[i], filename);
-    if (fs.existsSync(combined)) {
-      return combined;
-    }
-  }
-  return filename;
+// Use import.meta.dirname here once we drop support for node v18.
+const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+
+export const srcDir = __dirname;
+
+// Returns an absolute path for a file, resolving it relative to this script
+// (i.e. relative to the src/ directory).
+export function localFile(filename) {
+  assert(!path.isAbsolute(filename));
+  return path.join(srcDir, filename);
 }
 
 // Anything needed by the script that we load below must be added to the
@@ -301,10 +291,10 @@ export class Benchmarker {
  * global scope of the compiler itself which avoids exposing all of the compiler
  * internals to user JS library code.
  */
-export const compileTimeContext = {
+export const compileTimeContext = vm.createContext({
   process,
   console,
-};
+});
 
 /**
  * A symbols to the macro context.
@@ -322,13 +312,22 @@ export function applySettings(obj) {
 }
 
 export function loadSettingsFile(f) {
-  var settings = {};
-  vm.runInNewContext(read(f), settings, {filename: find(f)});
+  const settings = {};
+  vm.runInNewContext(read(f), settings, {filename: f});
   applySettings(settings);
+  return settings;
+}
+
+export function loadDefaultSettings() {
+  const rtn = loadSettingsFile(localFile('settings.js'));
+  Object.assign(rtn, loadSettingsFile(localFile('settings_internal.js')));
+  return rtn;
 }
 
 export function runInMacroContext(code, options) {
-  return vm.runInNewContext(code, compileTimeContext, options);
+  compileTimeContext['__filename'] = options.filename;
+  compileTimeContext['__dirname'] = path.dirname(options.filename);
+  return vm.runInContext(code, compileTimeContext, options);
 }
 
 addToCompileTimeContext({
