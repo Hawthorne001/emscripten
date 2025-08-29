@@ -1781,8 +1781,7 @@ Module['postRun'] = () => {
       }
     ''')
     create_file('my_test.input', 'abc')
-    self.emcc('main.c', ['--embed-file', 'my_test.input'], output_filename='a.out.js')
-    self.assertContained('zyx', self.run_process(config.JS_ENGINES[0] + ['a.out.js'], stdout=PIPE, stderr=PIPE).stdout)
+    self.do_runf('main.c', 'zyx', cflags=['--embed-file', 'my_test.input'])
 
   def test_abspaths(self):
     # Includes with absolute paths are generally dangerous, things like -I/usr/.. will get to system
@@ -8949,15 +8948,10 @@ addToLibrary({
         });
       }
 ''')
-    # use SINGLE_FILE since we don't want to depend on loading a side .wasm file on the environment in this test;
-    # with the wrong env we have very odd failures
-    self.run_process([EMCC, 'main.c', '-sSINGLE_FILE'])
+    self.run_process([EMCC, 'main.c', '-sENVIRONMENT=node,shell'])
     src = read_file('a.out.js')
-    envs = ['web', 'worker', 'node', 'shell']
-    for env in envs:
+    for env in ['web', 'worker', 'node', 'shell']:
       for engine in config.JS_ENGINES:
-        if engine == config.V8_ENGINE:
-          continue # ban v8, weird failures
         actual = 'NODE' if engine == config.NODE_JS_TEST else 'SHELL'
         print(env, actual, engine)
         module = {'ENVIRONMENT': env}
@@ -10363,6 +10357,9 @@ end
       '--minify=0',
       '-lbase64.js',
       '-Werror=closure',
+      '-sSTRICT', '-sASSERTIONS=0',
+      '-sAUTO_NATIVE_LIBRARIES',
+      '-sAUTO_JS_LIBRARIES',
       '-sINCLUDE_FULL_LIBRARY',
       '-sOFFSCREEN_FRAMEBUFFER',
       # Enable as many features as possible in order to maximise
